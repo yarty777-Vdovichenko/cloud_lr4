@@ -1,0 +1,118 @@
+name: FastAPI CD
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "sha-<40 символів>"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: hpk-production-deployment
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - name: Validate tag and create image URL
+        id: image
+        env:
+          TAG: ${{ inputs.image_tag }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          if [[ ! "$TAG" =~ ^sha-[0-9a-f]{40}$ ]]; then
+            echo "Error: expected sha- followed by 40 lowercase hex characters"
+            exit 1
+          fi
+          REPOSITORY=$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/$REPOSITORY:$TAG" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      service_url: ${{ steps.endpoint.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Deploy to Cloud Run
+        env:
+          IMAGE: ${{ needs.validate.outputs.image }}
+          PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION }}
+          SERVICE: ${{ vars.GCP_SERVICE }}
+        shell: bash
+        run: |
+          gcloud config set project "$PROJECT"
+          gcloud run deploy "$SERVICE" \
+            --image "$IMAGE" \
+            --region "$REGION" \
+            --port 8000 \
+            --cpu 1 \
+            --memory 512Mi \
+            --min-instances 0 \
+            --max-instances 2 \
+            --quiet
+
+      - name: Obtain service URL
+        id: endpoint
+        env:
+          REGION: ${{ vars.GCP_REGION }}
+          SERVICE: ${{ vars.GCP_SERVICE }}
+        shell: bash
+        run: |
+          URL=$(gcloud run services describe "$SERVICE" \
+            --region "$REGION" --format='value(status.url)')
+          if [[ ! "$URL" =~ ^https://.+ ]]; then
+            echo "Could not obtain public HTTPS URL"
+            exit 1
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+  smoke:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify health endpoint
+        env:
+          SERVICE_URL: ${{ needs.deploy.outputs.service_url }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, time
+          from urllib.request import urlopen
+
+          url = os.environ["SERVICE_URL"].rstrip("/") + "/common/healthcheck"
+
+          for attempt in range(1, 7):
+              try:
+                  with urlopen(url, timeout=15) as response:
+                      data = json.load(response)
+                      assert response.status == 200
+                      assert data["status"] == "ok"
+                  print(f"Smoke test passed: {url}")
+                  break
+              except Exception as exc:
+                  print(f"Attempt {attempt}/6 failed: {exc}")
+                  if attempt == 6:
+                      raise
+                  time.sleep(5)
+          PY
