@@ -24,4 +24,4 @@ platforms:
       memory: 512Mi
     scaling:
       min_instances: 0
-      max_instances: 2
+      max_instances: 3
