@@ -100,7 +100,7 @@ jobs:
           import json, os, time
           from urllib.request import urlopen
 
-          url = os.environ["SERVICE_URL"].rstrip("/") + "/common/healthcheck"
+          url = os.environ["SERVICE_URL"].rstrip("/") + "/health"
 
           for attempt in range(1, 7):
               try:
