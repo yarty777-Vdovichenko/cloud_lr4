@@ -15,6 +15,11 @@ def health():
     return {"status": "ok", "version": "v2"}
 
 
+@app.get("/common/healthcheck")
+def healthcheck():
+    return {"status": "ok", "version": "v2"}
+
+
 @app.get("/info")
 def info():
     return {
