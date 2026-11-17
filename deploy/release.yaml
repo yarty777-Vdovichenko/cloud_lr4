@@ -1,0 +1,27 @@
+app: hpk-fastapi
+environment: production
+
+image:
+  registry: ghcr.io
+  repository: OWNER/REPOSITORY
+  tag: sha-ВАШ_ПОВНИЙ_SHA
+
+container:
+  port: 8000
+
+health:
+  path: /common/healthcheck
+
+strategy:
+  type: canary
+  stages: [0, 10, 50, 100]
+
+platforms:
+  google_cloud_run:
+    region: europe-west1
+    resources:
+      cpu: "1"
+      memory: 512Mi
+    scaling:
+      min_instances: 0
+      max_instances: 2
