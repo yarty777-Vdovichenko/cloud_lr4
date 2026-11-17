@@ -3,8 +3,8 @@ environment: production
 
 image:
   registry: ghcr.io
-  repository: OWNER/REPOSITORY
-  tag: sha-ВАШ_ПОВНИЙ_SHA
+  repository: yarty777-Vdovichenko/cloud_lr4
+  tag: sha-0ff541797327955df320303b61b470a3a282288a
 
 container:
   port: 8000
